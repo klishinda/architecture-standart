@@ -1,0 +1,47 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title "C4 диаграмма контекста открытия депозита онлайн"
+
+Person(client, "Клиент", "И потенциальный, и существующий")
+System(abs, "АБС", "Автоматизированная Банковская Система")
+System(ib, "ИБ", "Интернет Банк")
+System(web, "Сайт", "Сайт банка")
+System(tel, "Телеком система", "Генерация и отправка СМС через телеком оператора")
+System_Ext(call_center, "Call центры", "Кто обрабатывает заявки")
+Person(manager_call, "Менеджер call-центра")
+Person(manager_credit, "Менеджер бэк-офиса кредитов")
+Person(manager_deposit, "Менеджер бэк-офиса депозитов")
+Person(manager_front, "Менеджер фронт-офиса")
+System_Ext(gos, "Госорганы", "ЦБ, ФССП, ФНС и т.д.")
+
+
+' --- UC1 ---
+Rel(client, web, "UC1 - Клиент видит ставки")
+Rel(web, call_center, "UC1 - Заявки оказываются в системе call-центра")
+
+' --- UC2 ---
+Rel(client, ib, "UC2 - Клиент регистрируется и видит предложения")
+Rel(ib, tel, "UC2 - Формирование подтверждения о выбранном депозите")
+Rel(ib, abs, "UC2 - Заявка зафиксирована")
+
+' --- UC3 ---
+Rel(manager_call, call_center, "UC3 - Менеджер просматривает заявки")
+Rel(call_center, abs, "UC3 - Получает данные о клиенте и текущих особых условиях")
+Rel(manager_call, client, "UC3 - Связывается с предложением")
+
+' --- UC4 ---
+Rel(manager_credit, gos, "UC4 - Получает в ручном режиме инфо черных списках, запросах и тд")
+Rel(manager_credit, abs, "UC4 - Ежедневная работа")
+Rel(abs, ib, "UC4 - Отправляются обновленные ставки")
+
+' --- UC5 ---
+Rel(client, manager_front, "UC5 - Приходит в офис для идентификации")
+Rel(manager_front, abs, "UC5 - Фиксирует данные клиента")
+
+' --- UC6 ---
+Rel(abs, manager_deposit, "UC6 - Оповещение о новой заявке")
+Rel(manager_deposit, abs, "UC4 и UC6 - Ежедневная работа, подтверждение заявки")
+Rel(tel, client, "UC2 и UC6 - Отправляется СМС о заявке/об открытом вкладе")
+
+@enduml
