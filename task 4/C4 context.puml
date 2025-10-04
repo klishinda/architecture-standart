@@ -1,0 +1,18 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title "C4 диаграмма контекста открытия депозита онлайн"
+
+System(abs, "АБС", "Автоматизированная Банковская Система")
+System_Ext(sftp, "Хранилище данных")
+
+Person(manager_call, "Менеджер call-центра")
+Person(manager_deposit, "Менеджер бэк-офиса депозитов")
+
+
+Rel(manager_call, sftp, "Загружает заявку")
+Rel(sftp, abs, "Заявка выгружается и обрабатывается")
+Rel(manager_deposit, abs, "Ежедневная работа")
+Rel(manager_deposit, sftp, "Загружает ежедневную информацию")
+
+@enduml
