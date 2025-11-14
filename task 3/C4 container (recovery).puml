@@ -1,0 +1,44 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title "C4 диаграмма контейнеров открытия депозита онлайн (СЛУЧАЙ СБОЯ ОСНОВНОГО ЦОД)"
+
+Person(client, "Существующий клиент")
+System(gateway, "API Gateway")
+
+System_Boundary(sb_dc_main, "Основной ЦОД") {
+  Container(dep, "Сервис для депозитов", "Java", "Начало распила монолита ИБ, формирование заявки на депозит")
+  ContainerDb(dep_db, "БД депозитов", "Postgresql", "Сохранение данных")
+  ContainerQueue(dep_kafka, "Очередь на создание депозита", "Kafka")
+  Container(dep_router, "Маршрутизатор запросов к DB", "Java", "На запись или чтение с минимальной задержкой - через kafka, на чтение - некоторые к резервной БД")
+}
+
+System_Boundary(sb_dc_res, "Резервный ЦОД") {
+  Container(ib_res, "ИБ", "Монолит", "Для упрощения схемы тут и web, и сервис, и DB")
+  Container(dep_res, "Сервис для депозитов", "Java", "Начало распила монолита ИБ, формирование заявки на депозит")
+  ContainerDb(dep_db_res, "БД депозитов", "Postgresql", "Сохранение данных")
+  Container(dep_router_res, "Маршрутизатор запросов к DB", "Java", "На запись или чтение с минимальной задержкой - через kafka, на чтение - некоторые к резервной БД")
+  ContainerQueue(recover_kafka, "Очередь с пропущенными событиями основным ЦОДом за время сбоя", "Kafka")
+  Container(abs_rep, "Сервис взаимодействия с репликой", "Java", "Этот сервис используется для чтения данных в случае стабильной работы основного ЦОДа")
+  ContainerDb(abs_db_rep, "Реплика АБС", "Oracle", "БД для чтения данных, где задержка обновления данных допустима (при просмотре пользователем истории операций, списка открытых счетов, например)")
+}
+
+Container(abs, "АБС", "Десктоп на Delphi, логика на Oracle PLSQL")
+
+Rel(client, ib_res, "Регистрируется и видит предложения", "HTTPS")
+Rel(ib_res, gateway, "Запрос клиента", "REST")
+Rel(gateway, dep_res, "Запрос клиента", "REST")
+Rel(dep_res, dep_router_res, "Запрос клиента", "REST")
+Rel(dep_router_res, dep_db_res, "Получение инфо", "SQL")
+Rel(dep_router_res, recover_kafka, "Отправка сообщений для дальнейшей записи в основную АБС", "AMQP")
+Rel(dep_router_res, abs_rep, "Запрос на получение данных из реплики", "REST")
+Rel(abs_rep, abs_db_rep, "Чтение из реплики", "SQL")
+
+Rel(recover_kafka, dep, "После восстановления основного ЦОД", "AMQP")
+Rel(dep, dep_router, "Маршрутизация запроса", "REST")
+Rel(dep_router, dep_db, "Получение инфо", "SQL")
+Rel(dep_router, dep_kafka, "Отправка сообщений для дальнейшей записи в основную АБС", "AMQP")
+Rel(dep_kafka, abs, "Обработка командой АБС", "AMQP")
+dep_router -[dashed]-> abs_rep : "При штатной работе"
+
+@enduml

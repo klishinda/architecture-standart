@@ -1,0 +1,118 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title "C4 диаграмма контейнеров открытия депозита онлайн (СТАНДАРТНЫЙ СЦЕНАРИЙ)"
+
+Person(manager_call, "Менеджер call-центра")
+System_Ext(gos, "Госорганы", "ЦБ, ФССП, ФНС и т.д.")
+System_Ext(tel_oper, "Телеком оператор")
+System(file, "Файловая система")
+note bottom of file: С учётом задания 4, что интеграции по API невозможны
+System(gateway, "API Gateway", "Сейчас для балансировки + задел на расширение функционала в микросервисах")
+
+System_Boundary(sb_client, "Клиенты") {
+  Person(client_new, "Новый клиент")
+  Person(client, "Существующий клиент")
+}
+
+System_Boundary(sb_back, "Сотрудники компании") {
+  Person(manager_credit, "Менеджер бэк-офиса кредитов")
+  Person(manager_deposit, "Менеджер бэк-офиса депозитов")
+  Person(manager_front, "Менеджер фронт-офиса")
+}
+
+System_Boundary(sb_call, "Call-центры") {
+  System(call_center_int, "Call-центр в нашем контуре")
+  System_Ext(call_center_ext, "Call-центр аутсорс")
+}
+
+System_Boundary(sb_ib, "ИБ") {
+  Container(ib_web, "Web интерфейс", "React")
+  Container(ib, "Сервис для ИБ", "Java", "Агрегация и подготовка данных для web")
+  ContainerDb(ib_db, "БД ИБ", "Postgresql", "Инфо ИБ + кэш АБС (редко меняющиеся данные - ставки раз в день, курсы валют раз в несколько часов и т.д.)")
+}
+
+System_Boundary(sb_tel, "Телеком") {
+  Container(tel, "Шлюз отправки СМС", "Java", "Вычитывание очереди и отправка СМС")
+  ContainerDb(tel_db, "БД шлюза СМС", "Postgresql")
+  ContainerQueue(tel_kafka, "Очередь на формирование СМС", "Kafka")
+}
+
+System_Boundary(sb_site, "Сайт") {
+  Container(site_web, "Web сайт", "React", "Просмотр через web")
+  Container(site, "Сервис для сайта", "Java", "Данные для фронта, работа с заявками")
+  ContainerDb(site_db, "БД сайта", "Postgresql", "Сохранение общего инфо")
+}
+
+System_Boundary(sb_abs, "АБС") {
+  Container(abs, "АБС", "Десктоп на Delphi, логика на Oracle PLSQL")
+  Container(abs_layer, "Сервис взаимодействия с холодными данными", "Java", "Сохранение в новую БД и зачистка из АБС, выгрузка из холодной БД")
+  ContainerDb(abs_cold_db, "Холодное БД АБС", "Postgresql", "Старые транзакции дольше 5 лет, удаленные/неактивные клиенты, данные для аудитов и т.д.")
+  Container(abs_kafka, "Kafka обработчик", "Java", "Забирает данные из kafka и записывает в АБС")
+}
+
+System_Boundary(sb_dep, "Микросервисы депозит") {
+  Container(dep_web, "Web интерфейс для сотрудников", "React")
+  Container(dep, "Сервис для депозитов", "Java", "Начало распила монолита ИБ, формирование заявки на депозит")
+  ContainerDb(dep_db, "БД депозитов", "Postgresql", "Сохранение данных")
+  ContainerQueue(dep_kafka, "Очередь на создание депозита", "Kafka")
+  Container(dep_router, "Маршрутизатор запросов к DB", "Java", "На запись или чтение с минимальной задержкой - через kafka, на чтение - некоторые к резервной БД")
+}
+
+System_Boundary(sb_dc, "Резервный ЦОД") {
+  Container(abs_rep, "Сервис взаимодействия с репликой", "Java")
+  ContainerDb(abs_db_rep, "Реплика АБС", "Oracle", "БД для чтения данных, где задержка обновления данных допустима (при просмотре пользователем истории операций, списка открытых счетов, например)")
+}
+note bottom of sb_dc: Подробнее о резервном в отдельной C4 схеме
+
+
+' --- Сайт ---
+Rel(client_new, site_web, "Новый клиент видит предложения", "HTTPS")
+Rel(site_web, site, "Взаимодействует", "REST")
+Rel(site, site_db, "Получает информацию", "SQL")
+Rel(site, file, "Передает информацию", "CSV")
+
+' --- ИБ ---
+Rel(client, ib_web, "Регистрируется и видит предложения", "HTTPS")
+Rel(ib_web, ib, "Заявка сохраняется", "REST")
+Rel(ib, ib_db, "Взаимодействие с данными", "SQL")
+Rel(ib, tel_kafka, "Подтверждение заявки на открытие вклада", "AMQP")
+
+
+' --- Телеком ---
+Rel(tel_kafka, tel, "Вычитывание очереди", "AMQP")
+Rel(tel, tel_oper, "Отправка сообщений", "REST")
+Rel(tel, tel_db, "Сохранение данных")
+
+' --- АБС ---
+Rel(abs, abs_layer, "Сбор и удаление старых данных", "Java/PLSQL")
+Rel(abs_layer, abs_cold_db, "Сохранение данных", "SQL")
+
+
+' --- Call-центр ---
+Rel(manager_call, file, "Просмотр и загрузка заявок", "CSV")
+Rel(manager_call, sb_call, "Обработка инфо из CSV, ведение истории звонков", "CSV")
+Rel(file, abs, "Получение csv, формирование ответа из АБС по предоставленным данным, загрузка обратно", "CSV")
+Rel(manager_call, client_new, "Связывается с предложением")
+
+' --- Депозиты ---
+Rel(ib, gateway, "Вызов создания депозита", "REST")
+Rel(gateway, dep, "Вызов создания депозита", "REST")
+Rel(dep_kafka, abs_kafka, "Вычитывание прослойко", "AMQP")
+Rel(abs_kafka, abs, "Сохранение в АБС", "PLSQL")
+Rel(dep_web, dep, "Просмотр сотрудниками", "REST")
+Rel(dep, dep_router, "Маршрутизатор запроса", "REST")
+Rel(dep_router, dep_db, "Сохранение данных", "REST")
+Rel(dep_router, dep_kafka, "Передача сообщения в АБС/чтение данных из АБС", "AMQP")
+Rel(dep_router, abs_rep, "Чтение из реплики", "REST")
+Rel(abs_rep, abs_db_rep, "Чтение из реплики", "SQL")
+Rel(manager_credit, gos, "Ручная выгрузка excel, файлов", "CSV")
+Rel(manager_credit, abs, "Ежедневная работа")
+
+' --- Подтверждение заявки ---
+Rel(client_new, manager_front, "Приходит в офис для идентификации")
+Rel(manager_front, abs, "Ежедневная работа")
+Rel(manager_deposit, abs, "Ежедневная работа")
+Rel(abs, tel_kafka, "Сообщение об открытии вклада")
+
+@enduml
